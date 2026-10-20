@@ -452,6 +452,7 @@ void RF_loop()
     for (a = rl_mode_s_state.aircrafts; a; a = a->next) {
       if (a->even_cprtime && a->odd_cprtime &&
           abs((long) (a->even_cprtime - a->odd_cprtime)) <= MODE_S_INTERACTIVE_TTL * 1000 ) {
+        fo = EmptyFO; /* no carry-over from the previous target */
         if (es1090_decode(a, &ThisAircraft, &fo)) {
           memset(fo.raw, 0, sizeof(fo.raw));
           Traffic_Update(&fo);

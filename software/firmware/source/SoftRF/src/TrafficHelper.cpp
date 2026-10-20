@@ -397,7 +397,10 @@ void ParseData()
     Hex2Bin(TxDataTemplate, RxBuffer);
 #endif
 
-    memset(fo.raw, 0, sizeof(fo.raw));
+    /* start from a clean record: decoders only fill the fields their
+     * protocol carries, and with the FANET/1090 mux the previous target
+     * (e.g. a Mode S callsign) must not leak into this one */
+    fo = EmptyFO;
     memcpy(fo.raw, RxBuffer, rx_size);
 
     if (settings->nmea_p) {
