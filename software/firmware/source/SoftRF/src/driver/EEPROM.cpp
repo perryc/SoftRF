@@ -79,6 +79,16 @@ void EEPROM_setup()
   }
   settings = &eeprom_block.field.settings;
 
+  /*
+   * acft_addr / es_mux live in formerly reserved bytes. A settings block
+   * written by older firmware carries erased-flash ones there, which would
+   * read as address FFFFFF with the mux on. Treat all-ones as "never set".
+   */
+  if (EEPROM_acft_addr() == 0x00FFFFFF) {
+    EEPROM_set_acft_addr(0);
+    settings->es_mux = false;
+  }
+
   SoC->EEPROM_extension(cmd);
 }
 

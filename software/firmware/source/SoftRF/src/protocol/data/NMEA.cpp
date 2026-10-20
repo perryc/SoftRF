@@ -931,8 +931,6 @@ void NMEA_Process_SRF_SKV_Sentences()
             EEPROM_set_acft_addr(addr);
             Serial.print(F("Aircraft address = ")); Serial.println(addr, HEX);
 
-            /* apply immediately; no restart, so a client can follow up
-             * with $PSRFC in the same session */
             ThisAircraft.addr = addr ? addr : (SoC->getChipId() & 0x00FFFFFF);
             a_updated = true;
           }
@@ -943,7 +941,12 @@ void NMEA_Process_SRF_SKV_Sentences()
             a_updated = true; /* takes effect live via RF_mux_loop() */
           }
           if (a_updated) {
+            /* same sequence as $PSRFC: a flash write with the SoftDevice and
+             * watchdog live resets the nRF52, so shut them down and restart */
+            SoC->WDT_fini();
+            if (SoC->Bluetooth_ops) { SoC->Bluetooth_ops->fini(); }
             EEPROM_store();
+            nmea_cfg_restart();
           }
         }
       }
