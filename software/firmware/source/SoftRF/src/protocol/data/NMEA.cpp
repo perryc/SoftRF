@@ -927,10 +927,10 @@ void NMEA_Process_SRF_SKV_Sentences()
             EEPROM_set_acft_addr(addr);
             Serial.print(F("Aircraft address = ")); Serial.println(addr, HEX);
 
-            SoC->WDT_fini();
-            if (SoC->Bluetooth_ops) { SoC->Bluetooth_ops->fini(); }
+            /* apply immediately and persist; no restart, so a client can
+             * follow up with $PSRFC in the same session */
+            ThisAircraft.addr = addr ? addr : (SoC->getChipId() & 0x00FFFFFF);
             EEPROM_store();
-            nmea_cfg_restart();
           }
         }
       }
