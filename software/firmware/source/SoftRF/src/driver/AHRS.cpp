@@ -22,7 +22,8 @@ static const ahrs_chip_ops_t lsm6dso_ops = { "LSM6DSO" };
 
 #if defined(ENABLE_AHRS)
 
-#define LSM6DSO_ADDR        0x6A
+static uint8_t lsm_addr = 0x6A;      /* 0x6A (SA0 low) or 0x6B (SA0 high) */
+#define LSM6DSO_ADDR        lsm_addr
 #define LSM6DSO_WHO_AM_I    0x0F
 #define LSM6DSO_ID          0x6C
 #define LSM6DSO_CTRL1_XL    0x10
@@ -79,9 +80,20 @@ byte AHRS_setup(void)
     return IMU_NONE;
   }
 
+  /* the X1 bring-up sets the sensor bus pins but leaves starting the bus
+   * to whichever driver needs it first; make sure it is up */
+  Wire.begin();
+  Wire.setClock(400000);
+  delay(5);
+
   uint8_t id = 0;
-  if (!lsm_read(LSM6DSO_WHO_AM_I, &id, 1) || id != LSM6DSO_ID) {
-    Serial.print(F("LSM6DSO not found, WHO_AM_I = 0x")); Serial.println(id, HEX);
+  bool found = false;
+  for (uint8_t a = 0x6A; a <= 0x6B && !found; a++) {
+    lsm_addr = a; id = 0;
+    found = lsm_read(LSM6DSO_WHO_AM_I, &id, 1) && id == LSM6DSO_ID;
+  }
+  if (!found) {
+    Serial.print(F("LSM6DSO not found, last WHO_AM_I = 0x")); Serial.println(id, HEX);
     return IMU_NONE;
   }
 
@@ -127,9 +139,29 @@ static void mahony(float gx, float gy, float gz, float ax, float ay, float az, f
 
 void AHRS_loop(void)
 {
-  if (!ahrs_present) return;
-
   unsigned long now = millis();
+  if (!ahrs_present) {
+    /* no IMU on this hardware revision (Seeed lists the 6-axis and 3-axis
+     * sensors as "future version"); re-probe once a minute and report */
+    static unsigned long probe_ms = 0;
+    if (now - probe_ms >= 60000) {
+      probe_ms = now;
+      uint8_t ida = 0, idb = 0;
+      lsm_addr = 0x6A; lsm_read(LSM6DSO_WHO_AM_I, &ida, 1);
+      lsm_addr = 0x6B; lsm_read(LSM6DSO_WHO_AM_I, &idb, 1);
+      Serial.print(F("$PSRFM,NOIMU,")); Serial.print(ida, HEX); Serial.print(','); Serial.print(idb, HEX);
+      Serial.print(F(",baro=")); Serial.print(hw_info.baro);
+      Serial.print(F(",i2c="));                 /* who answers on the sensor bus */
+      for (uint8_t a = 0x08; a < 0x78; a++) {
+        Wire.beginTransmission(a);
+        if (Wire.endTransmission() == 0) { Serial.print(a, HEX); Serial.print(' '); }
+      }
+      Serial.println();
+      if (ida == LSM6DSO_ID || idb == LSM6DSO_ID) { AHRS_setup(); }
+    }
+    return;
+  }
+
   if (now - ahrs_sample_ms < AHRS_SAMPLE_MS) return;
   float dt = (ahrs_sample_ms == 0) ? 0.01f : (now - ahrs_sample_ms) / 1000.0f;
   if (dt > 0.2f) dt = 0.2f;
@@ -168,6 +200,17 @@ void AHRS_loop(void)
   slip_deg  = atan2f(ay, (az < 0 ? -az : 1.0f)) * RAD_TO_DEG;
   g_load    = -az;                      /* z is down in the aircraft frame */
   ahrs_valid = true;
+
+  /* USB console diagnostic, 1 Hz: raw sensor-frame accel (g) and gyro
+   * (deg/s) plus the fused angles, for axis mapping and level checks */
+  static unsigned long dbg_ms = 0;
+  if (now - dbg_ms >= 1000) {
+    dbg_ms = now;
+    Serial.print(F("$PSRFM,"));
+    Serial.print(sax, 3); Serial.print(','); Serial.print(say, 3); Serial.print(','); Serial.print(saz, 3); Serial.print(',');
+    Serial.print(sgx, 1); Serial.print(','); Serial.print(sgy, 1); Serial.print(','); Serial.print(sgz, 1); Serial.print(',');
+    Serial.print(roll_deg, 1); Serial.print(','); Serial.print(pitch_deg, 1); Serial.print(','); Serial.println(g_load, 2);
+  }
 
   if (now - ahrs_out_ms >= AHRS_OUT_INTERVAL_MS && settings->gdl90 != GDL90_OFF) {
     ahrs_out_ms = now;
