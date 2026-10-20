@@ -25,7 +25,7 @@
 #include <avr/dtostrf.h>
 
 /* Maximum of tracked flying objects is now SoC-specific constant */
-#define MAX_TRACKING_OBJECTS    8
+#define MAX_TRACKING_OBJECTS    32 /* fork: fleet use; 8 upstream */
 
 #define DEFAULT_SOFTRF_MODEL    SOFTRF_MODEL_BADGE
 

@@ -357,7 +357,11 @@ static unsigned long ModeS_Time_Marker = 0;
 #define MUX_DEFAULT_LISTEN_MS 1100
 #define MUX_PEER_TTL_MS      20000
 #define MUX_MIN_DWELL_MS       120
-#define MUX_MAX_PEERS            4
+#define MUX_MAX_PEERS            8
+/* above this many live peers the per-peer windows would cover the whole
+ * period; fall back to a fixed split so 1090 keeps getting air time */
+#define MUX_CROWD_PEERS          4
+#define MUX_CROWD_FANET_MS    1700
 
 typedef struct {
   uint32_t      addr;
@@ -420,6 +424,15 @@ static bool mux_fanet_required(unsigned long now)
   /* own beacon due or overdue: stay on FANET until RF_Transmit sends it */
   if (isValidFix() && (long) (now + MUX_TX_LEAD_MS - TxTimeMarker) >= 0) {
     return true;
+  }
+
+  int live = 0;
+  for (int i = 0; i < MUX_MAX_PEERS; i++) {
+    if (mux_peers[i].addr && now - mux_peers[i].last_rx <= MUX_PEER_TTL_MS) live++;
+  }
+  if (live > MUX_CROWD_PEERS) {
+    /* crowd: fixed FANET share per period, beacons fall where they fall */
+    return (now % MUX_PERIOD_MS) < MUX_CROWD_FANET_MS;
   }
 
   bool any_peer = false;
