@@ -65,7 +65,7 @@ typedef struct Settings {
     bool     nmea_p:1;
     bool     nmea_l:1;
     bool     nmea_s:1;
-    bool     resvd1:1;
+    bool     es_mux:1;    /* FANET + 1090ES time-multiplexed receive (LR2021) */
     uint8_t  nmea_out:3;
 
     uint8_t  bluetooth:3; /* ESP32 built-in Bluetooth */

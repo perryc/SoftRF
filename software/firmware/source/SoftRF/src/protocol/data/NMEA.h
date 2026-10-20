@@ -42,8 +42,9 @@ enum
 #define PSRFS_VERSION       1
 #define MAX_PSRFS_LEN       64
 
-/* $PSRFA,<version>,<ICAO hex6>*hh : configured aircraft (Mode S) address;
- * "$PSRFA,?*" queries, all-zero address reverts to the chip-derived ID */
+/* $PSRFA,<version>,<ICAO hex6>[,<mux>]*hh : configured aircraft (Mode S)
+ * address and the FANET/1090ES receive mux flag (LR2021 radios, FANET
+ * protocol). "$PSRFA,?*" queries; all-zero address reverts to the chip ID */
 #define PSRFA_VERSION       1
 #define MAX_PSRFA_LEN       32
 

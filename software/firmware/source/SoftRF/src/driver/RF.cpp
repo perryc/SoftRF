@@ -329,13 +329,123 @@ extern mode_s_t rl_mode_s_state;
 static unsigned long ModeS_Time_Marker = 0;
 #endif /* USE_RADIOLIB && LR20XX && ES1090 */
 
+#if !defined(EXCLUDE_FANET) && !defined(EXCLUDE_ES1090)
+/*
+ * FANET / 1090ES multiplexer.
+ *
+ * The LR2021 is one radio: SoftRF normally runs a single protocol on it.
+ * With es_mux set and FANET selected, the radio alternates between a FANET
+ * window (own beacon + listen) and 1090ES receive-only time, re-tuning the
+ * modem in place (no reset/calibration) so a switch costs a few ms.
+ *
+ * Schedule: a period of MUX_PERIOD_MS (the FANET beacon interval) with one
+ * FANET window of MUX_FANET_WIN_MS per period; the rest is 1090. Our own
+ * beacon goes out at the start of the window, so a peer running the same
+ * scheme phase-locks on us and we on it. Window placement is predictive:
+ * FANET receptions are timestamped and the running interval between them
+ * predicts the next one; the window is centred on that prediction (bounded
+ * so 1090 keeps at least MUX_ES_MIN_MS). With no FANET traffic heard, the
+ * window simply recurs every period.
+ */
+#define MUX_PERIOD_MS     3000
+#define MUX_FANET_WIN_MS  1100
+#define MUX_ES_MIN_MS     1200
+#define MUX_TX_LEAD_MIN   30
+#define MUX_TX_LEAD_MAX   150
+
+static bool          mux_on_es      = false;
+static unsigned long mux_win_start  = 0;
+static unsigned long mux_win_end    = 0;
+static unsigned long mux_next_start = 0;
+static unsigned long mux_last_rx    = 0;
+static unsigned long mux_rx_interval= 0;  /* running estimate, 0 = unknown */
+
+bool RF_mux_active(void)
+{
+  return settings->es_mux                            &&
+         settings->rf_protocol == RF_PROTOCOL_FANET  &&
+         rf_chip != NULL && rf_chip->mux_select != NULL;
+}
+
+bool RF_mux_on_es(void)
+{
+  return RF_mux_active() && mux_on_es;
+}
+
+void RF_mux_note_rx(void)
+{
+  unsigned long now = millis();
+  if (mux_last_rx) {
+    unsigned long d = now - mux_last_rx;
+    if (d >= 1500 && d <= 6500) {           /* plausible beacon spacing */
+      mux_rx_interval = mux_rx_interval ? (mux_rx_interval * 3 + d) / 4 : d;
+    }
+  }
+  mux_last_rx = now;
+}
+
+static unsigned long mux_schedule_next(unsigned long now)
+{
+  unsigned long start = mux_win_start + MUX_PERIOD_MS;
+
+  if (mux_last_rx && mux_rx_interval) {
+    unsigned long pred = mux_last_rx + mux_rx_interval;
+    while (pred + MUX_FANET_WIN_MS / 2 < now) pred += mux_rx_interval;
+    if (pred < now + MUX_PERIOD_MS + MUX_FANET_WIN_MS) {
+      start = pred - MUX_FANET_WIN_MS / 2;  /* centre the window on the peer */
+    }
+  }
+  if (start < now + MUX_ES_MIN_MS) start = now + MUX_ES_MIN_MS;
+  return start;
+}
+
+static void RF_mux_loop(void)
+{
+  if (!RF_mux_active()) {
+    if (mux_on_es) {                         /* mux turned off while on 1090 */
+      rf_chip->mux_select(&fanet_proto_desc);
+      mux_on_es = false;
+    }
+    return;
+  }
+
+  unsigned long now = millis();
+
+  if (!mux_on_es) {
+    if (mux_win_end == 0) {                  /* first run: start a window now */
+      mux_win_start = now;
+      mux_win_end   = now + MUX_FANET_WIN_MS;
+    } else if (now >= mux_win_end) {
+      if (rf_chip->mux_select(&es1090_proto_desc)) {
+        mux_on_es      = true;
+        mux_next_start = mux_schedule_next(now);
+      }
+    }
+  } else if (now >= mux_next_start) {
+    if (rf_chip->mux_select(&fanet_proto_desc)) {
+      mux_on_es     = false;
+      mux_win_start = now;
+      mux_win_end   = now + MUX_FANET_WIN_MS;
+      /* own beacon right at the start of the window */
+      TxTimeMarker  = now + SoC->random(MUX_TX_LEAD_MIN, MUX_TX_LEAD_MAX);
+    }
+  }
+}
+#else
+bool RF_mux_active(void)  { return false; }
+bool RF_mux_on_es(void)   { return false; }
+void RF_mux_note_rx(void) { }
+static void RF_mux_loop(void) { }
+#endif /* FANET && ES1090 */
+
 void RF_loop()
 {
+  RF_mux_loop();
   RF_SetChannel();
 
 #if defined(USE_RADIOLIB) && !defined(EXCLUDE_LR20XX) && !defined(EXCLUDE_ES1090)
   if (rf_chip && rf_chip->type == RF_IC_LR2021       &&
-      settings->rf_protocol == RF_PROTOCOL_ADSB_1090 &&
+      (settings->rf_protocol == RF_PROTOCOL_ADSB_1090 || RF_mux_active()) &&
       millis() - ModeS_Time_Marker > MODES_TASK_INTERVAL) {
     struct mode_s_aircraft *a;
 
@@ -375,6 +485,10 @@ size_t RF_Encode(ufo_t *fop)
 
 bool RF_Transmit(size_t size, bool wait)
 {
+  if (RF_mux_on_es()) {
+    return false; /* 1090 is receive-only; keep the pending beacon for the FANET window */
+  }
+
   if (rf_chip && (size > 0)) {
     RF_tx_size = size;
 

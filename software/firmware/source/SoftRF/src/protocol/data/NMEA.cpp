@@ -94,9 +94,10 @@ TinyGPSCustom S_Version;
 TinyGPSCustom S_IGC_Key;
 #endif /* USE_OGN_ENCRYPTION */
 
-/* Aircraft (ICAO) address */
+/* Aircraft (ICAO) address + FANET/1090ES mux */
 TinyGPSCustom A_Version;
 TinyGPSCustom A_Addr;
+TinyGPSCustom A_Mux;
 
 #if defined(USE_SKYVIEW_CFG)
 #include "../../driver/EPD.h"
@@ -187,7 +188,8 @@ void NMEA_setup()
   term_num = 1;
 
   A_Version.begin      (gnss, psrf_a, term_num++);
-  A_Addr.begin         (gnss, psrf_a, term_num  );
+  A_Addr.begin         (gnss, psrf_a, term_num++);
+  A_Mux.begin          (gnss, psrf_a, term_num  );
 
 #if defined(USE_SKYVIEW_CFG)
   const char *pskv_c = "PSKVC";
@@ -913,13 +915,15 @@ void NMEA_Process_SRF_SKV_Sentences()
           char psrfa_buf[MAX_PSRFA_LEN];
 
           snprintf_P(psrfa_buf, sizeof(psrfa_buf),
-              PSTR("$PSRFA,%d,%06X*"), PSRFA_VERSION, EEPROM_acft_addr());
+              PSTR("$PSRFA,%d,%06X,%d*"), PSRFA_VERSION, EEPROM_acft_addr(),
+              settings->es_mux ? 1 : 0);
 
           NMEA_add_checksum(psrfa_buf, sizeof(psrfa_buf) - strlen(psrfa_buf));
 
           NMEA_Out(C_NMEA_Source, (byte *) psrfa_buf, strlen(psrfa_buf), false);
 
         } else if (atoi(A_Version.value()) == PSRFA_VERSION) {
+          bool a_updated = false;
           if (A_Addr.isUpdated())
           {
             uint32_t addr = strtoul(A_Addr.value(), NULL, 16) & 0x00FFFFFF;
@@ -927,9 +931,18 @@ void NMEA_Process_SRF_SKV_Sentences()
             EEPROM_set_acft_addr(addr);
             Serial.print(F("Aircraft address = ")); Serial.println(addr, HEX);
 
-            /* apply immediately and persist; no restart, so a client can
-             * follow up with $PSRFC in the same session */
+            /* apply immediately; no restart, so a client can follow up
+             * with $PSRFC in the same session */
             ThisAircraft.addr = addr ? addr : (SoC->getChipId() & 0x00FFFFFF);
+            a_updated = true;
+          }
+          if (A_Mux.isUpdated() && strlen(A_Mux.value()) > 0)
+          {
+            settings->es_mux = atoi(A_Mux.value()) ? true : false;
+            Serial.print(F("FANET/1090 mux = ")); Serial.println(settings->es_mux);
+            a_updated = true; /* takes effect live via RF_mux_loop() */
+          }
+          if (a_updated) {
             EEPROM_store();
           }
         }

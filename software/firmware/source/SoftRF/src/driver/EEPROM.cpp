@@ -203,6 +203,7 @@ void EEPROM_defaults()
                                            hw_info.model == SOFTRF_MODEL_HAM       ?
                                            POWER_SAVE_NORECEIVE : POWER_SAVE_NONE;
   eeprom_block.field.settings.freq_corr  = 0;
+  eeprom_block.field.settings.es_mux       = false;
   eeprom_block.field.settings.acft_addr[0] = 0;
   eeprom_block.field.settings.acft_addr[1] = 0;
   eeprom_block.field.settings.acft_addr[2] = 0;

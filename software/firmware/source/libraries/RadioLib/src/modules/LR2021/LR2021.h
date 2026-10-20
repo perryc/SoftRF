@@ -413,6 +413,16 @@ class LR2021: public LRxxxx {
       \returns \ref status_codes
     */
     int16_t setModem(ModemType_t modem) override;
+
+    /*!
+      \brief Select the packet type (modem) in place, keeping the chip
+      configured: no reset or recalibration. The caller re-applies the modem
+      parameters afterwards. SoftRF uses this to multiplex LoRa and OOK
+      (FANET / 1090ES) on one radio.
+      \param packetType RADIOLIB_LR2021_PACKET_TYPE_*
+      \returns \ref status_codes
+    */
+    int16_t selectPacketType(uint8_t packetType) { return(setPacketType(packetType)); }
     
     // configuration methods
 

@@ -1388,6 +1388,7 @@ static bool lr11xx_receive()
               RxBuffer[i] = RL_rxPacket_ptr->payload[i + offset];
             }
           }
+          RF_mux_note_rx();
           success = true;
           break;
         case RF_PROTOCOL_OGNTP:
@@ -1729,6 +1730,7 @@ static void lr20xx_channel(int8_t);
 static bool lr20xx_receive(void);
 static bool lr20xx_transmit(void);
 static void lr20xx_shutdown(void);
+static bool lr20xx_mux_select(const rf_proto_desc_t *);
 
 const rfchip_ops_t lr2021_ops = {
   RF_IC_LR2021,
@@ -1738,8 +1740,11 @@ const rfchip_ops_t lr2021_ops = {
   lr20xx_channel,
   lr20xx_receive,
   lr20xx_transmit,
-  lr20xx_shutdown
+  lr20xx_shutdown,
+  lr20xx_mux_select
 };
+
+static float lr20xx_txpow_set = 2; /* output power applied at setup, re-applied after a modem swap */
 
 LR2021  *radio_g4;
 
@@ -2013,6 +2018,11 @@ static void lr20xx_setup()
     rl_protocol     = &fanet_proto_desc;
     protocol_encode = &fanet_encode;
     protocol_decode = &fanet_decode;
+#if !defined(EXCLUDE_ES1090)
+    if (settings->es_mux) {
+      mode_s_init(&rl_mode_s_state); /* 1090 decoder for the mux windows */
+    }
+#endif /* EXCLUDE_ES1090 */
     break;
 #endif /* EXCLUDE_FANET */
 #if !defined(EXCLUDE_ES1090)
@@ -2588,11 +2598,95 @@ static void lr20xx_setup()
     break;
   }
   rl_state = radio_g4->setOutputPower(txpow);
+  lr20xx_txpow_set = txpow;
 
   rl_state = radio_g4->setRxBoostedGainMode(high ? RADIOLIB_LR2021_RX_BOOST_HF :
                                                    RADIOLIB_LR2021_RX_BOOST_LF);
   radio_g4->setPacketReceivedAction(lr20xx_receive_handler);
 }
+
+#if !defined(EXCLUDE_FANET) && !defined(EXCLUDE_ES1090)
+/*
+ * Re-tune between FANET (LoRa) and 1090ES (OOK) in place: packet type swap
+ * plus the modem parameters from lr20xx_setup(), without findChip()/
+ * calibration. Frequency follows on the next RF_SetChannel() because the
+ * channel cache is invalidated.
+ */
+static bool lr20xx_mux_select(const rf_proto_desc_t *p)
+{
+  int rl_state;
+
+  if (p == rl_protocol) {
+    return true;
+  }
+  if (p != &fanet_proto_desc && p != &es1090_proto_desc) {
+    return false;
+  }
+
+  radio_g4->standby();
+  lr20xx_receive_active   = false;
+  lr20xx_receive_complete = false;
+
+  RF_FreqPlan.setPlan(settings->band, p->type);
+  lr20xx_channel_prev = (int8_t) -1;
+
+  if (p == &fanet_proto_desc) {
+    rl_state = radio_g4->selectPacketType(RADIOLIB_LR2021_PACKET_TYPE_LORA);
+    if (rl_state != RADIOLIB_ERR_NONE) return false;
+
+    float bw;
+    switch (RF_FreqPlan.Bandwidth)
+    {
+    case RF_RX_BANDWIDTH_SS_62KHZ:  bw = 125.0; break;
+    case RF_RX_BANDWIDTH_SS_250KHZ: bw = 500.0; break;
+    case RF_RX_BANDWIDTH_SS_125KHZ:
+    default:                        bw = 250.0; break;
+    }
+    rl_state = radio_g4->setBandwidth(bw);
+    rl_state = radio_g4->setSpreadingFactor(7);
+    rl_state = radio_g4->setCodingRate(5);
+    rl_state = radio_g4->setSyncWord((uint8_t) p->syncword[0]);
+    rl_state = radio_g4->setPreambleLength(8);
+    rl_state = radio_g4->explicitHeader();
+    rl_state = radio_g4->setCRC(true);
+    rl_state = radio_g4->invertIQ(false);
+    rl_state = radio_g4->setOutputPower(lr20xx_txpow_set);
+
+    protocol_encode = &fanet_encode;
+    protocol_decode = &fanet_decode;
+  } else {
+    rl_state = radio_g4->selectPacketType(RADIOLIB_LR2021_PACKET_TYPE_OOK);
+    if (rl_state != RADIOLIB_ERR_NONE) return false;
+
+    rl_state = radio_g4->setBitRate(2000.0);
+    rl_state = radio_g4->setRxBandwidth(3076.0);
+    if (p->preamble_size > 0) {
+      rl_state = radio_g4->setPreambleLength(p->preamble_size * 8);
+    }
+    rl_state = radio_g4->setDataShaping(RADIOLIB_SHAPING_NONE);
+    rl_state = radio_g4->setCRC(0, 0);                 /* CRC in software */
+    rl_state = radio_g4->setEncoding(RADIOLIB_ENCODING_NRZ);
+    {
+      size_t pkt_size = p->payload_offset + p->payload_size + p->crc_size;
+      pkt_size += pkt_size;
+      pkt_size -= 1;
+      rl_state = radio_g4->fixedPacketLengthMode(pkt_size);
+    }
+    rl_state = radio_g4->setSyncWord((uint8_t *) p->syncword, (size_t) p->syncword_size);
+    rl_state = radio_g4->ookDetector(0xa902, 16, 0, false, false, 0);
+    rl_state = radio_g4->setGain(0);
+    rl_state = radio_g4->setOokDetectionThreshold(-80);
+
+    protocol_encode = NULL;
+    protocol_decode = NULL;
+  }
+
+  rl_protocol = p;
+  return true;
+}
+#else
+static bool lr20xx_mux_select(const rf_proto_desc_t *p) { (void) p; return false; }
+#endif /* FANET && ES1090 */
 
 #define ES1090_MONITOR_INTERVAL 30000
 

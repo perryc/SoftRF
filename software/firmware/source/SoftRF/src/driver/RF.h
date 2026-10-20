@@ -108,6 +108,9 @@ typedef struct rfchip_ops_struct {
   bool (*receive)();
   bool (*transmit)();
   void (*shutdown)();
+  /* optional: re-tune the modem to another protocol without a chip reset
+   * (used by the FANET/1090ES mux); NULL when unsupported */
+  bool (*mux_select)(const rf_proto_desc_t *);
 } rfchip_ops_t;
 
 typedef struct Slot_descr_struct {
@@ -141,6 +144,11 @@ uint8_t RF_Payload_Size(uint8_t);
 
 extern byte TxBuffer[MAX_PKT_SIZE], RxBuffer[MAX_PKT_SIZE];
 extern unsigned long TxTimeMarker;
+
+/* FANET / 1090ES receive multiplexing on a single LR2021 radio */
+bool RF_mux_active(void);   /* mux enabled and usable */
+bool RF_mux_on_es(void);    /* radio currently tuned to 1090 MHz */
+void RF_mux_note_rx(void);  /* driver: a FANET packet was just received */
 extern uint32_t tx_packets_counter, rx_packets_counter;
 
 extern const rfchip_ops_t *rf_chip;
