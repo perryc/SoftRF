@@ -112,6 +112,9 @@
 #if defined(PREMIUM_PACKAGE) && !defined(RASPBERRY_PI)
 #define ENABLE_AHRS
 #endif /* PREMIUM_PACKAGE */
+#if defined(ARDUINO_ARCH_NRF52)
+#define ENABLE_AHRS   /* fork: LSM6DSO attitude on the Card Mk III, src/driver/AHRS.cpp */
+#endif
 
 typedef struct UFO {
     uint8_t   raw[34];

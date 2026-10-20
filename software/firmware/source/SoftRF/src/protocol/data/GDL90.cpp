@@ -453,6 +453,25 @@ static size_t makeFFid(uint8_t *buf)
 #define makeOwnershipReport(b,a,f) makeType10and20(b, GDL90_OWNSHIP_MSG_ID, a, f)
 #define makeTrafficReport(b,a)     makeType10and20(b, GDL90_TRAFFIC_MSG_ID, a, true)
 
+/* fork: frame an arbitrary payload (used by the AHRS module) */
+size_t GDL90_Frame(uint8_t *buf, uint8_t msg_id, const uint8_t *msg, size_t len)
+{
+  uint8_t *ptr = buf;
+  uint16_t fcs = GDL90_calcFCS(msg_id, (uint8_t *) msg, len);
+  uint8_t fcs_lsb = fcs & 0xFF, fcs_msb = (fcs >> 8) & 0xFF;
+
+  *ptr++ = 0x7E;
+  *ptr++ = msg_id;
+  ptr = GDL90_EscapeFilter(ptr, (uint8_t *) msg, len);
+  ptr = GDL90_EscapeFilter(ptr, &fcs_lsb, 1);
+  ptr = GDL90_EscapeFilter(ptr, &fcs_msb, 1);
+  *ptr++ = 0x7E;
+  return (size_t) (ptr - buf);
+}
+
+static void GDL90_Out(byte *buf, size_t size);
+void GDL90_Out_Ext(byte *buf, size_t size) { GDL90_Out(buf, size); }
+
 static void GDL90_Out(byte *buf, size_t size)
 {
   if (size > 0) {

@@ -161,6 +161,9 @@ extern const uint8_t gdl90_to_aircraft_type[] PROGMEM;
 extern const char *GDL90_CallSign_Prefix[];
 
 void GDL90_Export(void);
+/* fork */
+size_t GDL90_Frame(uint8_t *buf, uint8_t msg_id, const uint8_t *msg, size_t len);
+void   GDL90_Out_Ext(byte *buf, size_t size);
 uint16_t GDL90_calcFCS(uint8_t, uint8_t *, int);
 uint8_t *GDL90_EscapeFilter(uint8_t *, uint8_t *, int);
 
