@@ -334,31 +334,42 @@ static unsigned long ModeS_Time_Marker = 0;
  * FANET / 1090ES multiplexer.
  *
  * The LR2021 is one radio: SoftRF normally runs a single protocol on it.
- * With es_mux set and FANET selected, the radio alternates between a FANET
- * window (own beacon + listen) and 1090ES receive-only time, re-tuning the
- * modem in place (no reset/calibration) so a switch costs a few ms.
+ * With es_mux set and FANET selected, the radio is re-tuned in place
+ * (no reset/calibration, a few ms) between FANET and 1090ES receive.
  *
- * Schedule: a period of MUX_PERIOD_MS (the FANET beacon interval) with one
- * FANET window of MUX_FANET_WIN_MS per period; the rest is 1090. Our own
- * beacon goes out at the start of the window, so a peer running the same
- * scheme phase-locks on us and we on it. Window placement is predictive:
- * FANET receptions are timestamped and the running interval between them
- * predicts the next one; the window is centred on that prediction (bounded
- * so 1090 keeps at least MUX_ES_MIN_MS). With no FANET traffic heard, the
- * window simply recurs every period.
+ * Schedule. FANET is required at three kinds of moments, 1090 fills the
+ * rest:
+ *  - our own beacon: SoftRF's TxTimeMarker keeps its normal 2.5-3.5 s
+ *    cadence; shortly before it is due we go to FANET and stay until the
+ *    beacon has gone out (RF_Transmit bumps the marker);
+ *  - a listen window around each known peer's predicted next beacon:
+ *    receptions are timestamped per address and the running interval
+ *    predicts the next one (MUX_LISTEN_HALF_MS either side);
+ *  - with no peer heard recently, a listen window right after our own
+ *    beacon, so first contact can happen.
+ * Own cadence and listening are deliberately independent: tying the
+ * beacon to the window start lets two mux units lock into a pattern
+ * where A always hears B and B never hears A.
  */
-#define MUX_PERIOD_MS     3000
-#define MUX_FANET_WIN_MS  1100
-#define MUX_ES_MIN_MS     1200
-#define MUX_TX_LEAD_MIN   30
-#define MUX_TX_LEAD_MAX   150
+#define MUX_PERIOD_MS         3000   /* FANET interval_mid, used until measured */
+#define MUX_LISTEN_HALF_MS     550
+#define MUX_TX_LEAD_MS          80
+#define MUX_DEFAULT_LISTEN_MS 1100
+#define MUX_PEER_TTL_MS      20000
+#define MUX_MIN_DWELL_MS       120
+#define MUX_MAX_PEERS            4
 
-static bool          mux_on_es      = false;
-static unsigned long mux_win_start  = 0;
-static unsigned long mux_win_end    = 0;
-static unsigned long mux_next_start = 0;
-static unsigned long mux_last_rx    = 0;
-static unsigned long mux_rx_interval= 0;  /* running estimate, 0 = unknown */
+typedef struct {
+  uint32_t      addr;
+  unsigned long last_rx;
+  unsigned long interval;   /* running estimate, 0 = unknown */
+} mux_peer_t;
+
+static mux_peer_t    mux_peers[MUX_MAX_PEERS];
+static bool          mux_on_es        = false;
+static unsigned long mux_last_switch  = 0;
+static unsigned long mux_last_tx_done = 0;
+static unsigned long mux_prev_marker  = 0;
 
 bool RF_mux_active(void)
 {
@@ -372,31 +383,61 @@ bool RF_mux_on_es(void)
   return RF_mux_active() && mux_on_es;
 }
 
-void RF_mux_note_rx(void)
+void RF_mux_note_rx(uint32_t addr)
 {
   unsigned long now = millis();
-  if (mux_last_rx) {
-    unsigned long d = now - mux_last_rx;
-    if (d >= 1500 && d <= 6500) {           /* plausible beacon spacing */
-      mux_rx_interval = mux_rx_interval ? (mux_rx_interval * 3 + d) / 4 : d;
+  mux_peer_t *slot = NULL, *oldest = &mux_peers[0];
+
+  for (int i = 0; i < MUX_MAX_PEERS; i++) {
+    if (mux_peers[i].addr == addr) { slot = &mux_peers[i]; break; }
+    if (mux_peers[i].addr == 0 ||
+        (long) (mux_peers[i].last_rx - oldest->last_rx) < 0) {
+      oldest = &mux_peers[i];
+      if (mux_peers[i].addr == 0) break;
     }
   }
-  mux_last_rx = now;
+  if (slot == NULL) {
+    slot = oldest;
+    slot->addr = addr;
+    slot->interval = 0;
+  } else {
+    unsigned long d = now - slot->last_rx;
+    if (d >= 1500 && d <= 6500) {           /* plausible beacon spacing */
+      slot->interval = slot->interval ? (slot->interval * 3 + d) / 4 : d;
+    }
+  }
+  slot->last_rx = now;
 }
 
-static unsigned long mux_schedule_next(unsigned long now)
+static bool mux_fanet_required(unsigned long now)
 {
-  unsigned long start = mux_win_start + MUX_PERIOD_MS;
-
-  if (mux_last_rx && mux_rx_interval) {
-    unsigned long pred = mux_last_rx + mux_rx_interval;
-    while (pred + MUX_FANET_WIN_MS / 2 < now) pred += mux_rx_interval;
-    if (pred < now + MUX_PERIOD_MS + MUX_FANET_WIN_MS) {
-      start = pred - MUX_FANET_WIN_MS / 2;  /* centre the window on the peer */
-    }
+  /* a moved marker means a beacon just went out (or the marker was reset) */
+  if (TxTimeMarker != mux_prev_marker) {
+    if ((long) (TxTimeMarker - now) > 0) mux_last_tx_done = now;
+    mux_prev_marker = TxTimeMarker;
   }
-  if (start < now + MUX_ES_MIN_MS) start = now + MUX_ES_MIN_MS;
-  return start;
+
+  /* own beacon due or overdue: stay on FANET until RF_Transmit sends it */
+  if (isValidFix() && (long) (now + MUX_TX_LEAD_MS - TxTimeMarker) >= 0) {
+    return true;
+  }
+
+  bool any_peer = false;
+  for (int i = 0; i < MUX_MAX_PEERS; i++) {
+    mux_peer_t *p = &mux_peers[i];
+    if (p->addr == 0 || now - p->last_rx > MUX_PEER_TTL_MS) continue;
+    any_peer = true;
+    unsigned long iv   = p->interval ? p->interval : MUX_PERIOD_MS;
+    unsigned long pred = p->last_rx + iv;
+    while ((long) (pred + MUX_LISTEN_HALF_MS - now) < 0) pred += iv;
+    if ((long) (now - (pred - MUX_LISTEN_HALF_MS)) >= 0) return true;
+  }
+
+  /* nobody heard lately: listen for a while after each own beacon */
+  if (!any_peer && now - mux_last_tx_done < MUX_DEFAULT_LISTEN_MS) {
+    return true;
+  }
+  return false;
 }
 
 static void RF_mux_loop(void)
@@ -410,31 +451,20 @@ static void RF_mux_loop(void)
   }
 
   unsigned long now = millis();
+  bool want_fanet = mux_fanet_required(now);
 
-  if (!mux_on_es) {
-    if (mux_win_end == 0) {                  /* first run: start a window now */
-      mux_win_start = now;
-      mux_win_end   = now + MUX_FANET_WIN_MS;
-    } else if (now >= mux_win_end) {
-      if (rf_chip->mux_select(&es1090_proto_desc)) {
-        mux_on_es      = true;
-        mux_next_start = mux_schedule_next(now);
-      }
-    }
-  } else if (now >= mux_next_start) {
-    if (rf_chip->mux_select(&fanet_proto_desc)) {
-      mux_on_es     = false;
-      mux_win_start = now;
-      mux_win_end   = now + MUX_FANET_WIN_MS;
-      /* own beacon right at the start of the window */
-      TxTimeMarker  = now + SoC->random(MUX_TX_LEAD_MIN, MUX_TX_LEAD_MAX);
-    }
+  if (want_fanet == !mux_on_es) return;      /* already on the right band */
+  if (now - mux_last_switch < MUX_MIN_DWELL_MS) return;
+
+  if (rf_chip->mux_select(want_fanet ? &fanet_proto_desc : &es1090_proto_desc)) {
+    mux_on_es       = !want_fanet;
+    mux_last_switch = now;
   }
 }
 #else
 bool RF_mux_active(void)  { return false; }
 bool RF_mux_on_es(void)   { return false; }
-void RF_mux_note_rx(void) { }
+void RF_mux_note_rx(uint32_t addr) { (void) addr; }
 static void RF_mux_loop(void) { }
 #endif /* FANET && ES1090 */
 

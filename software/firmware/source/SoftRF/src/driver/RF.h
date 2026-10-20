@@ -148,7 +148,7 @@ extern unsigned long TxTimeMarker;
 /* FANET / 1090ES receive multiplexing on a single LR2021 radio */
 bool RF_mux_active(void);   /* mux enabled and usable */
 bool RF_mux_on_es(void);    /* radio currently tuned to 1090 MHz */
-void RF_mux_note_rx(void);  /* driver: a FANET packet was just received */
+void RF_mux_note_rx(uint32_t addr); /* driver: a FANET packet from addr was just received */
 extern uint32_t tx_packets_counter, rx_packets_counter;
 
 extern const rfchip_ops_t *rf_chip;

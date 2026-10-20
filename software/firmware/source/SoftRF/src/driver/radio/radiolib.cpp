@@ -1388,7 +1388,9 @@ static bool lr11xx_receive()
               RxBuffer[i] = RL_rxPacket_ptr->payload[i + offset];
             }
           }
-          RF_mux_note_rx();
+          /* FANET header: [0] type, [1] manufacturer, [2..3] id (LE) */
+          RF_mux_note_rx(((uint32_t) RxBuffer[1] << 16) |
+                         ((uint32_t) RxBuffer[3] <<  8) | RxBuffer[2]);
           success = true;
           break;
         case RF_PROTOCOL_OGNTP:
