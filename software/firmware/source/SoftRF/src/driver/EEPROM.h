@@ -80,14 +80,17 @@ typedef struct Settings {
     uint8_t  power_save;
 
     int8_t   freq_corr; /* +/-, kHz */
-    uint8_t  resvd2;
-    uint8_t  resvd3;
-    uint8_t  resvd4;
+    /* 24-bit ICAO (Mode S) address, big-endian; all zero = derive from chip ID */
+    uint8_t  acft_addr[3];
 
     /* Use a key provided by (local) gliding contest organizer */
     uint32_t igc_key[4];
 
 } __attribute__((packed)) settings_t;
+
+/* configured ICAO address, 0 when unset */
+uint32_t EEPROM_acft_addr(void);
+void     EEPROM_set_acft_addr(uint32_t addr);
 
 typedef struct EEPROM_S {
     uint32_t  magic;

@@ -203,10 +203,27 @@ void EEPROM_defaults()
                                            hw_info.model == SOFTRF_MODEL_HAM       ?
                                            POWER_SAVE_NORECEIVE : POWER_SAVE_NONE;
   eeprom_block.field.settings.freq_corr  = 0;
+  eeprom_block.field.settings.acft_addr[0] = 0;
+  eeprom_block.field.settings.acft_addr[1] = 0;
+  eeprom_block.field.settings.acft_addr[2] = 0;
   eeprom_block.field.settings.igc_key[0] = 0;
   eeprom_block.field.settings.igc_key[1] = 0;
   eeprom_block.field.settings.igc_key[2] = 0;
   eeprom_block.field.settings.igc_key[3] = 0;
+}
+
+uint32_t EEPROM_acft_addr(void)
+{
+  return ((uint32_t) settings->acft_addr[0] << 16) |
+         ((uint32_t) settings->acft_addr[1] <<  8) |
+          (uint32_t) settings->acft_addr[2];
+}
+
+void EEPROM_set_acft_addr(uint32_t addr)
+{
+  settings->acft_addr[0] = (addr >> 16) & 0xFF;
+  settings->acft_addr[1] = (addr >>  8) & 0xFF;
+  settings->acft_addr[2] =  addr        & 0xFF;
 }
 
 void EEPROM_store()

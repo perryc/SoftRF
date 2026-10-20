@@ -297,12 +297,16 @@ static size_t legacy_v6_encode(void *legacy_pkt, ufo_t *this_aircraft) {
     pkt->type = 0; /* Air V6 position */
     pkt->addr = id & 0x00FFFFFF;
 
+    if (EEPROM_acft_addr() != 0 && pkt->addr == EEPROM_acft_addr()) {
+      pkt->addr_type = ADDR_TYPE_ICAO;  /* configured ICAO (Mode S) address */
+    } else {
 #if !defined(SOFTRF_ADDRESS)
-    pkt->addr_type = ADDR_TYPE_FLARM; /* ADDR_TYPE_ANONYMOUS */
+      pkt->addr_type = ADDR_TYPE_FLARM; /* ADDR_TYPE_ANONYMOUS */
 #else
-    pkt->addr_type = (pkt->addr == SOFTRF_ADDRESS ?
-                      ADDR_TYPE_ICAO : ADDR_TYPE_FLARM); /* ADDR_TYPE_ANONYMOUS */
+      pkt->addr_type = (pkt->addr == SOFTRF_ADDRESS ?
+                        ADDR_TYPE_ICAO : ADDR_TYPE_FLARM); /* ADDR_TYPE_ANONYMOUS */
 #endif
+    }
 
     pkt->parity = 0;
 

@@ -30,6 +30,7 @@
 
 #include "../../../SoftRF.h"
 #include "../../driver/RF.h"
+#include "../../driver/EEPROM.h"
 
 const rf_proto_desc_t fanet_proto_desc = {
   .name             = {'F','A','N','E','T', 0},
@@ -217,8 +218,7 @@ bool fanet_decode(void *fanet_pkt, ufo_t *this_aircraft, ufo_t *fop) {
   if (pkt->ext_header == 0 && pkt->type == 1 ) {  /* Tracking  */
 
     /* ignore this device own (relayed) packets */
-    if (pkt->vendor  == SOFRF_FANET_VENDOR_ID &&
-        pkt->address == (this_aircraft->addr & 0xFFFF) /* && */
+    if (((uint32_t) pkt->vendor << 16 | pkt->address) == this_aircraft->addr /* && */
         /* pkt->forward == 1 */) {
       return rval;
     }
@@ -323,7 +323,11 @@ size_t fanet_encode(void *fanet_pkt, ufo_t *this_aircraft) {
   pkt->forward        = 1;
   pkt->type           = 1;  /* Tracking  */
 
-  pkt->vendor         = SOFRF_FANET_VENDOR_ID;
+  if (EEPROM_acft_addr() != 0 && id == EEPROM_acft_addr()) {
+    pkt->vendor       = (id >> 16) & 0xFF; /* ICAO address split: upper byte as vendor */
+  } else {
+    pkt->vendor       = SOFRF_FANET_VENDOR_ID;
+  }
   pkt->address        = id & 0xFFFF;
 
 #if defined(FANET_DEPRECATED)

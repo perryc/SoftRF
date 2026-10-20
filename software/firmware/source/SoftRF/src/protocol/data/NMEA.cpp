@@ -94,6 +94,10 @@ TinyGPSCustom S_Version;
 TinyGPSCustom S_IGC_Key;
 #endif /* USE_OGN_ENCRYPTION */
 
+/* Aircraft (ICAO) address */
+TinyGPSCustom A_Version;
+TinyGPSCustom A_Addr;
+
 #if defined(USE_SKYVIEW_CFG)
 #include "../../driver/EPD.h"
 
@@ -177,6 +181,13 @@ void NMEA_setup()
   S_Version.begin      (gnss, psrf_s, term_num++);
   S_IGC_Key.begin      (gnss, psrf_s, term_num  );
 #endif /* USE_OGN_ENCRYPTION */
+
+/* Aircraft (ICAO) address */
+  const char *psrf_a = "PSRFA";
+  term_num = 1;
+
+  A_Version.begin      (gnss, psrf_a, term_num++);
+  A_Addr.begin         (gnss, psrf_a, term_num  );
 
 #if defined(USE_SKYVIEW_CFG)
   const char *pskv_c = "PSKVC";
@@ -889,6 +900,33 @@ void NMEA_Process_SRF_SKV_Sentences()
           }
 
           if (cfg_is_updated) {
+            SoC->WDT_fini();
+            if (SoC->Bluetooth_ops) { SoC->Bluetooth_ops->fini(); }
+            EEPROM_store();
+            nmea_cfg_restart();
+          }
+        }
+      }
+
+      if (A_Version.isUpdated()) {
+        if (strncmp(A_Version.value(), "?", 1) == 0) {
+          char psrfa_buf[MAX_PSRFA_LEN];
+
+          snprintf_P(psrfa_buf, sizeof(psrfa_buf),
+              PSTR("$PSRFA,%d,%06X*"), PSRFA_VERSION, EEPROM_acft_addr());
+
+          NMEA_add_checksum(psrfa_buf, sizeof(psrfa_buf) - strlen(psrfa_buf));
+
+          NMEA_Out(C_NMEA_Source, (byte *) psrfa_buf, strlen(psrfa_buf), false);
+
+        } else if (atoi(A_Version.value()) == PSRFA_VERSION) {
+          if (A_Addr.isUpdated())
+          {
+            uint32_t addr = strtoul(A_Addr.value(), NULL, 16) & 0x00FFFFFF;
+
+            EEPROM_set_acft_addr(addr);
+            Serial.print(F("Aircraft address = ")); Serial.println(addr, HEX);
+
             SoC->WDT_fini();
             if (SoC->Bluetooth_ops) { SoC->Bluetooth_ops->fini(); }
             EEPROM_store();

@@ -179,7 +179,9 @@ void setup()
 
   SoC->Button_setup();
 
-  ThisAircraft.addr = SoC->getChipId() & 0x00FFFFFF;
+  /* configured ICAO address (see $PSRFA) wins over the chip-derived one */
+  ThisAircraft.addr = EEPROM_acft_addr() ?
+                      EEPROM_acft_addr() : (SoC->getChipId() & 0x00FFFFFF);
 
   hw_info.rf = RF_setup();
 

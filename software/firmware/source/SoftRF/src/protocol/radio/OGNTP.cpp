@@ -97,12 +97,17 @@ bool ogntp_decode(void *pkt, ufo_t *this_aircraft, ufo_t *fop) {
     return false;
   }
 
+  uint8_t addr_type;
+  if (EEPROM_acft_addr() != 0 && this_aircraft->addr == EEPROM_acft_addr()) {
+    addr_type = ADDR_TYPE_ICAO;  /* configured ICAO (Mode S) address */
+  } else {
 #if !defined(SOFTRF_ADDRESS)
-  uint8_t addr_type = ADDR_TYPE_ANONYMOUS;
+    addr_type = ADDR_TYPE_ANONYMOUS;
 #else
-  uint8_t addr_type = (this_aircraft->addr == SOFTRF_ADDRESS ?
-                        ADDR_TYPE_ICAO : ADDR_TYPE_ANONYMOUS);
+    addr_type = (this_aircraft->addr == SOFTRF_ADDRESS ?
+                 ADDR_TYPE_ICAO : ADDR_TYPE_ANONYMOUS);
 #endif
+  }
 
   /* ignore this device own (relayed) packets */
   if ((ogn_rx_pkt.Packet.Header.Address    == this_aircraft->addr) &&
