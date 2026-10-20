@@ -1665,7 +1665,11 @@ void PickGNSSFix()
     isValidSentence = gnss.encode(GNSSbuf[GNSS_cnt]);
     if (GNSSbuf[GNSS_cnt] == '\r' && isValidSentence) {
       for (ndx = GNSS_cnt - 4; ndx >= 0; ndx--) { // skip CS and *
-        if (settings->nmea_g && (GNSSbuf[ndx] == '$') && (GNSSbuf[ndx+1] == 'G')) {
+        /* fork: forward GNSS sentences only with a valid fix. Before that the
+         * chip emits RMC 'V' / GGA quality 0 with stale or zero coordinates,
+         * and an EFB that takes them as a position starts in the wrong place */
+        if (settings->nmea_g && isValidFix() &&
+            (GNSSbuf[ndx] == '$') && (GNSSbuf[ndx+1] == 'G')) {
 
           size_t write_size = GNSS_cnt - ndx + 1;
 
