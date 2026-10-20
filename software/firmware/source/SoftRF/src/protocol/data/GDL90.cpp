@@ -540,15 +540,13 @@ void GDL90_Export()
          (this_moment - Container[i].timestamp) <= EXPORT_EXPIRATION_TIME) {
 
         /*
-         * Disable distance filter when we have no GNSS data source to locate
-         * own position. Assume that we never gonna fly over 'Null Island'.
+         * Fork: no lateral gate on the GDL90 export. Upstream sends only
+         * targets within ALARM_ZONE_NONE (25.5 km) once own position is
+         * known, which made distant 1090 traffic vanish at first fix; the
+         * EFB applies its own range filter.
          */
-
-        if ((ThisAircraft.latitude == 0 && ThisAircraft.longitude == 0) ||
-            Container[i].distance < ALARM_ZONE_NONE) {
-          size = makeTrafficReport(buf, &Container[i]);
-          GDL90_Out(buf, size);
-        }
+        size = makeTrafficReport(buf, &Container[i]);
+        GDL90_Out(buf, size);
       }
     }
   }
